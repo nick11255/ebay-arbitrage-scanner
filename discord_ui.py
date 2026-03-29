@@ -1,18 +1,23 @@
 """Discord UI components: deal embeds, claim system, onboarding DMs."""
 
+from __future__ import annotations
+
 import logging
+from typing import Optional
+
 import discord
 from discord.ext import commands
 
 from analyzer import calculate_profit
 from tracker import record_claim
+from types_ import DealScore, ProfitInfo
 import config
 
 logger = logging.getLogger(__name__)
 
 # Claim reaction emoji
-CLAIM_EMOJI = "\U0001f4b0"  # money bag
-PASS_EMOJI = "\u274c"  # red X
+CLAIM_EMOJI: str = "\U0001f4b0"  # money bag
+PASS_EMOJI: str = "\u274c"  # red X
 
 # Track active claims: message_id -> deal info
 active_claims: dict[int, dict] = {}
@@ -30,7 +35,9 @@ def get_score_color(score: int) -> discord.Color:
         return discord.Color.red()
 
 
-def create_deal_embed(item: dict, deal: dict, product_name: str = "") -> discord.Embed:
+def create_deal_embed(
+    item: dict, deal: DealScore, product_name: str = ""
+) -> discord.Embed:
     """Create a rich embed for a deal alert.
 
     Args:
@@ -38,13 +45,13 @@ def create_deal_embed(item: dict, deal: dict, product_name: str = "") -> discord
         deal: Deal score result from analyzer
         product_name: Display name from product database
     """
-    profit = deal["profit_info"]
-    score = deal["score"]
-    grade = deal["grade"]
+    profit: ProfitInfo = deal["profit_info"]
+    score: int = deal["score"]
+    grade: str = deal["grade"]
 
-    title = item.get("title", "Unknown Item")[:100]
-    url = item.get("itemWebUrl", "")
-    image = item.get("image", {}).get("imageUrl", "")
+    title: str = item.get("title", "Unknown Item")[:100]
+    url: str = item.get("itemWebUrl", "")
+    image: str = item.get("image", {}).get("imageUrl", "")
 
     embed = discord.Embed(
         title=f"[{grade}] {title}",
@@ -76,8 +83,8 @@ def create_deal_embed(item: dict, deal: dict, product_name: str = "") -> discord
     )
 
     # Score breakdown
-    breakdown = deal.get("breakdown", {})
-    score_text = (
+    breakdown: dict = deal.get("breakdown", {})
+    score_text: str = (
         f"Margin: {breakdown.get('margin', 0)}/35 | "
         f"Sell-Through: {breakdown.get('sell_through', 0)}/25\n"
         f"Comps: {breakdown.get('comp_confidence', 0)}/15 | "
@@ -103,10 +110,10 @@ def create_deal_embed(item: dict, deal: dict, product_name: str = "") -> discord
     )
 
     # Condition and seller
-    condition = item.get("condition", "N/A")
-    seller = item.get("seller", {})
-    seller_name = seller.get("username", "Unknown")
-    feedback = seller.get("feedbackPercentage", "N/A")
+    condition: str = item.get("condition", "N/A")
+    seller: dict = item.get("seller", {})
+    seller_name: str = seller.get("username", "Unknown")
+    feedback: str = seller.get("feedbackPercentage", "N/A")
 
     embed.add_field(
         name="Details",
@@ -122,9 +129,9 @@ def create_deal_embed(item: dict, deal: dict, product_name: str = "") -> discord
 async def post_deal(
     bot: commands.Bot,
     item: dict,
-    deal: dict,
+    deal: DealScore,
     product_name: str = "",
-):
+) -> None:
     """Post a deal to the appropriate Discord channel with claim reactions.
 
     Args:
@@ -133,7 +140,7 @@ async def post_deal(
         deal: Scored deal dict from analyzer
         product_name: Product database name
     """
-    channel_id = (
+    channel_id: int = (
         config.DISCORD_HOT_DEALS_CHANNEL
         if deal["channel"] == "hot_deals"
         else config.DISCORD_DEALS_CHANNEL
@@ -148,7 +155,7 @@ async def post_deal(
         logger.error(f"Could not find channel {channel_id}")
         return
 
-    embed = create_deal_embed(item, deal, product_name)
+    embed: discord.Embed = create_deal_embed(item, deal, product_name)
     message = await channel.send(embed=embed)
 
     # Add claim reactions
@@ -169,19 +176,19 @@ async def post_deal(
     )
 
 
-def setup_claim_handler(bot: commands.Bot):
+def setup_claim_handler(bot: commands.Bot) -> None:
     """Set up the reaction-based claim system."""
 
     @bot.event
-    async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    async def on_raw_reaction_add(payload: discord.RawReactionActionEvent) -> None:
         if payload.user_id == bot.user.id:
             return
 
         if payload.message_id not in active_claims:
             return
 
-        claim = active_claims[payload.message_id]
-        emoji = str(payload.emoji)
+        claim: dict = active_claims[payload.message_id]
+        emoji: str = str(payload.emoji)
 
         if emoji == CLAIM_EMOJI and claim["claimed_by"] is None:
             claim["claimed_by"] = payload.user_id
@@ -189,7 +196,7 @@ def setup_claim_handler(bot: commands.Bot):
             channel = bot.get_channel(payload.channel_id)
             if channel:
                 user = bot.get_user(payload.user_id)
-                username = user.display_name if user else f"User {payload.user_id}"
+                username: str = user.display_name if user else f"User {payload.user_id}"
 
                 await channel.send(
                     f"**CLAIMED** by {username}! "
@@ -203,11 +210,11 @@ def setup_claim_handler(bot: commands.Bot):
                 logger.info(f"Deal claimed by {username}")
 
 
-def setup_onboarding(bot: commands.Bot):
+def setup_onboarding(bot: commands.Bot) -> None:
     """Set up new member onboarding DMs."""
 
     @bot.event
-    async def on_member_join(member: discord.Member):
+    async def on_member_join(member: discord.Member) -> None:
         try:
             embed = discord.Embed(
                 title="Welcome to the eBay Arbitrage Scanner!",
@@ -229,6 +236,7 @@ def setup_onboarding(bot: commands.Bot):
                     "`!calc <buy> <sell>` - Calculate profit\n"
                     "`!risk <query>` - Risk assessment\n"
                     "`!stats` - Your P&L stats\n"
+                    "`!dashboard` - Analytics overview\n"
                     "`!settings` - View bot settings"
                 ),
                 inline=False,

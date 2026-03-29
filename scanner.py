@@ -4,6 +4,8 @@ Run with: python scanner.py
 Can also be run via cron for automated scanning.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
@@ -20,6 +22,9 @@ from rotation import (
     format_rotation_status, estimate_daily_calls,
 )
 from products import get_group_summary
+from types_ import (
+    CompStats, DealScore, ProductConfig, RedFlagResult, SellerScore,
+)
 
 # Logging
 logging.basicConfig(
@@ -30,27 +35,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def print_header():
+def print_header() -> None:
     print("=" * 60)
     print("  eBay Arbitrage Scanner")
     print("=" * 60)
     print()
     print(get_group_summary())
     print()
-    estimate = estimate_daily_calls()
+    estimate: dict = estimate_daily_calls()
     print(f"API Budget: ~{estimate['estimated_daily_calls']}/{config.DAILY_API_LIMIT} calls/day")
     print(f"Min Profit: ${config.MIN_PROFIT:.2f} | Min Margin: {config.MIN_MARGIN:.1f}%")
     print()
 
 
-async def run_scan_cycle(ebay: EbayAPI):
+async def run_scan_cycle(ebay: EbayAPI) -> list[tuple[dict, DealScore, str]]:
     """Run one scan cycle on the next group."""
+    group_num: int
+    products: list[ProductConfig]
     group_num, products = get_next_scan_group()
     print(f"\n{'='*60}")
     print(f"  Scanning Group {group_num} ({len(products)} products)")
     print(f"{'='*60}\n")
 
-    deals = []
+    deals: list[tuple[dict, DealScore, str]] = []
 
     for i, product in enumerate(products, 1):
         if not ebay.can_make_call():
@@ -61,7 +68,7 @@ async def run_scan_cycle(ebay: EbayAPI):
 
         try:
             # Search active listings
-            items = await ebay.search_with_exclusions(
+            items: list[dict] = await ebay.search_with_exclusions(
                 query=product["query"],
                 exclude_keywords=product.get("exclude", []),
                 min_price=product.get("min_price"),
@@ -77,7 +84,7 @@ async def run_scan_cycle(ebay: EbayAPI):
             print(f"{len(items)} listings", end=" ")
 
             # Get sold comps
-            comps = await scrape_sold_comps(
+            comps: list[dict] = await scrape_sold_comps(
                 product["query"],
                 model_keywords=product.get("model_keywords"),
                 min_price=product.get("min_price"),
@@ -85,31 +92,33 @@ async def run_scan_cycle(ebay: EbayAPI):
                 max_results=15,
             )
             comps = refine_comps(comps, product)
-            comp_stats = analyze_comps(comps)
+            comp_stats: CompStats = analyze_comps(comps)
 
             print(f"| {comp_stats['num_comps']} comps (avg ${comp_stats['avg_price']:.2f})")
 
-            product_deals = 0
+            product_deals: int = 0
 
             for item in items:
-                price_info = item.get("price", {})
-                buy_price = float(price_info.get("value", 0))
+                price_info: dict = item.get("price", {})
+                buy_price: float = float(price_info.get("value", 0))
                 if buy_price <= 0:
                     continue
 
-                red_flags = check_red_flags(item.get("title", ""))
-                seller_info = item.get("seller", {})
-                seller_result = score_seller(seller_info) if seller_info else {"score": 50}
+                red_flags: RedFlagResult = check_red_flags(item.get("title", ""))
+                seller_info: dict = item.get("seller", {})
+                seller_result: SellerScore | dict = (
+                    score_seller(seller_info) if seller_info else {"score": 50}
+                )
 
-                deal = score_deal(
+                deal: DealScore = score_deal(
                     buy_price=buy_price,
                     comp_stats=comp_stats,
                     seller_score=seller_result["score"],
                     red_flags=red_flags["count"],
                 )
 
-                profit = deal["profit_info"].get("profit", 0)
-                margin = deal["profit_info"].get("margin", 0)
+                profit: float = deal["profit_info"].get("profit", 0)
+                margin: float = deal["profit_info"].get("margin", 0)
 
                 if (
                     profit >= config.MIN_PROFIT
@@ -139,7 +148,7 @@ async def run_scan_cycle(ebay: EbayAPI):
 
     if deals:
         for item, deal, name in sorted(deals, key=lambda x: -x[1]["score"]):
-            channel = deal["channel"].upper()
+            channel: str = deal["channel"].upper()
             print(f"[{channel}] {format_deal_summary(item, deal)}")
             print(f"  Link: {item.get('itemWebUrl', 'N/A')}")
             print()
@@ -147,13 +156,13 @@ async def run_scan_cycle(ebay: EbayAPI):
         print("No deals met the minimum profit/margin thresholds this cycle.")
 
     # Print API usage
-    usage = ebay.get_api_usage()
+    usage: dict = ebay.get_api_usage()
     print(f"\nAPI Usage: {usage['used']}/{usage['limit']} ({usage['percent']}%)")
 
     return deals
 
 
-async def main():
+async def main() -> None:
     if not config.EBAY_APP_ID:
         print("ERROR: EBAY_APP_ID not set in .env file")
         print("Copy .env.example to .env and fill in your credentials.")
@@ -161,7 +170,7 @@ async def main():
 
     print_header()
 
-    ebay = EbayAPI()
+    ebay: EbayAPI = EbayAPI()
     try:
         if "--continuous" in sys.argv:
             print("Running in continuous mode (Ctrl+C to stop)\n")

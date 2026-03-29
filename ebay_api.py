@@ -1,14 +1,18 @@
 """eBay Browse API client with OAuth2 and rate limiting."""
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import time
 import logging
 from datetime import datetime, timezone
 from typing import Optional
+
 import aiohttp
 
 import config
+from types_ import APIUsage
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +20,7 @@ logger = logging.getLogger(__name__)
 class EbayAPI:
     """eBay Browse API client with automatic token refresh and rate limiting."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.access_token: Optional[str] = None
         self.token_expiry: float = 0
         self.session: Optional[aiohttp.ClientSession] = None
@@ -24,19 +28,19 @@ class EbayAPI:
         self.api_calls_reset: datetime = datetime.now(timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock = asyncio.Lock()
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
         return self.session
 
-    async def close(self):
+    async def close(self) -> None:
         if self.session and not self.session.closed:
             await self.session.close()
 
-    def _check_daily_reset(self):
-        now = datetime.now(timezone.utc)
+    def _check_daily_reset(self) -> None:
+        now: datetime = datetime.now(timezone.utc)
         if now.date() > self.api_calls_reset.date():
             self.api_calls_today = 0
             self.api_calls_reset = now.replace(
@@ -47,7 +51,7 @@ class EbayAPI:
         self._check_daily_reset()
         return self.api_calls_today < config.DAILY_API_LIMIT
 
-    def get_api_usage(self) -> dict:
+    def get_api_usage(self) -> APIUsage:
         self._check_daily_reset()
         return {
             "used": self.api_calls_today,
@@ -56,17 +60,17 @@ class EbayAPI:
             "percent": round(self.api_calls_today / config.DAILY_API_LIMIT * 100, 1),
         }
 
-    async def _authenticate(self):
+    async def _authenticate(self) -> None:
         """Get OAuth2 token using client credentials."""
         async with self._lock:
             if self.access_token and time.time() < self.token_expiry - 60:
                 return
 
-            credentials = base64.b64encode(
+            credentials: str = base64.b64encode(
                 f"{config.EBAY_APP_ID}:{config.EBAY_CERT_ID}".encode()
             ).decode()
 
-            session = await self._get_session()
+            session: aiohttp.ClientSession = await self._get_session()
             async with session.post(
                 config.EBAY_AUTH_URL,
                 headers={
@@ -79,9 +83,9 @@ class EbayAPI:
                 },
             ) as resp:
                 if resp.status != 200:
-                    text = await resp.text()
+                    text: str = await resp.text()
                     raise Exception(f"eBay auth failed ({resp.status}): {text}")
-                data = await resp.json()
+                data: dict = await resp.json()
                 self.access_token = data["access_token"]
                 self.token_expiry = time.time() + data.get("expires_in", 7200)
                 logger.info("eBay OAuth token refreshed")
@@ -94,9 +98,9 @@ class EbayAPI:
             )
 
         await self._authenticate()
-        session = await self._get_session()
+        session: aiohttp.ClientSession = await self._get_session()
 
-        headers = kwargs.pop("headers", {})
+        headers: dict[str, str] = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {self.access_token}"
         headers["X-EBAY-C-MARKETPLACE-ID"] = config.EBAY_MARKETPLACE
         headers["X-EBAY-C-ENDUSERCTX"] = (
@@ -113,7 +117,7 @@ class EbayAPI:
                 await asyncio.sleep(60)
                 return await self._request(method, url, headers=headers, **kwargs)
             else:
-                text = await resp.text()
+                text: str = await resp.text()
                 logger.error(f"eBay API error ({resp.status}): {text}")
                 return {}
 
@@ -128,13 +132,13 @@ class EbayAPI:
         sort: str = "newlyListed",
     ) -> list[dict]:
         """Search eBay Browse API for active listings."""
-        params = {
+        params: dict[str, str] = {
             "q": query,
             "limit": str(min(limit, 200)),
             "sort": sort,
         }
 
-        filters = []
+        filters: list[str] = []
         if category_id:
             params["category_ids"] = category_id
         if min_price is not None:
@@ -146,16 +150,16 @@ class EbayAPI:
         if filters:
             params["filter"] = ",".join(filters)
 
-        url = f"{config.EBAY_BROWSE_URL}/item_summary/search"
-        data = await self._request("GET", url, params=params)
+        url: str = f"{config.EBAY_BROWSE_URL}/item_summary/search"
+        data: dict = await self._request("GET", url, params=params)
 
-        items = data.get("itemSummaries", [])
+        items: list[dict] = data.get("itemSummaries", [])
         logger.info(f"Search '{query}': found {len(items)} items")
         return items
 
     async def get_item(self, item_id: str) -> dict:
         """Get detailed item info from Browse API."""
-        url = f"{config.EBAY_BROWSE_URL}/item/{item_id}"
+        url: str = f"{config.EBAY_BROWSE_URL}/item/{item_id}"
         return await self._request("GET", url)
 
     async def search_with_exclusions(
@@ -167,7 +171,7 @@ class EbayAPI:
         limit: int = 50,
     ) -> list[dict]:
         """Search and filter out items matching exclude keywords."""
-        items = await self.search_items(
+        items: list[dict] = await self.search_items(
             query=query,
             min_price=min_price,
             max_price=max_price,
@@ -177,10 +181,10 @@ class EbayAPI:
         if not exclude_keywords:
             return items
 
-        exclude_lower = [kw.lower() for kw in exclude_keywords]
-        filtered = []
+        exclude_lower: list[str] = [kw.lower() for kw in exclude_keywords]
+        filtered: list[dict] = []
         for item in items:
-            title = item.get("title", "").lower()
+            title: str = item.get("title", "").lower()
             if not any(kw in title for kw in exclude_lower):
                 filtered.append(item)
 

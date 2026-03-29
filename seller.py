@@ -1,12 +1,17 @@
 """Seller trust scoring for eBay arbitrage risk assessment."""
 
+from __future__ import annotations
+
 import logging
+from typing import Optional
+
 import config
+from types_ import SellerScore
 
 logger = logging.getLogger(__name__)
 
 
-def score_seller(seller_info: dict) -> dict:
+def score_seller(seller_info: dict) -> SellerScore:
     """Calculate seller trust score from eBay seller data.
 
     Factors:
@@ -22,19 +27,20 @@ def score_seller(seller_info: dict) -> dict:
     Returns:
         Dict with score (0-100), grade, risk_level, details
     """
-    feedback_pct = seller_info.get("feedbackPercentage", "0")
+    feedback_pct: float
+    raw_pct = seller_info.get("feedbackPercentage", "0")
     try:
-        feedback_pct = float(str(feedback_pct).replace("%", ""))
+        feedback_pct = float(str(raw_pct).replace("%", ""))
     except (ValueError, TypeError):
         feedback_pct = 0
 
-    feedback_count = int(seller_info.get("feedbackScore", 0))
-    is_top_rated = seller_info.get("topRatedSeller", False)
+    feedback_count: int = int(seller_info.get("feedbackScore", 0))
+    is_top_rated: bool = seller_info.get("topRatedSeller", False)
 
     # Return policy analysis
-    return_policy = seller_info.get("returnPolicy", {})
-    accepts_returns = return_policy.get("returnsAccepted", False) if return_policy else False
-    return_period = return_policy.get("returnPeriod", {}).get("value", 0) if return_policy else 0
+    return_policy: Optional[dict] = seller_info.get("returnPolicy", {})
+    accepts_returns: bool = return_policy.get("returnsAccepted", False) if return_policy else False
+    return_period: int = return_policy.get("returnPeriod", {}).get("value", 0) if return_policy else 0
 
     # Feedback percentage score (0-35)
     if feedback_pct >= 99.5:
@@ -77,9 +83,9 @@ def score_seller(seller_info: dict) -> dict:
         return_score = 5
 
     # Top-rated seller bonus (0-20)
-    top_score = 20 if is_top_rated else 0
+    top_score: int = 20 if is_top_rated else 0
 
-    total = pct_score + count_score + return_score + top_score
+    total: int = pct_score + count_score + return_score + top_score
     total = min(100, max(0, total))
 
     # Grade
@@ -100,7 +106,7 @@ def score_seller(seller_info: dict) -> dict:
         risk = "high"
 
     # Specific warnings
-    warnings = []
+    warnings: list[str] = []
     if feedback_pct < config.SELLER_MIN_FEEDBACK:
         warnings.append(
             f"Feedback {feedback_pct}% below {config.SELLER_MIN_FEEDBACK}% threshold"
@@ -132,9 +138,9 @@ def score_seller(seller_info: dict) -> dict:
     }
 
 
-def format_seller_report(result: dict) -> str:
+def format_seller_report(result: SellerScore) -> str:
     """Format seller score into readable report."""
-    lines = [
+    lines: list[str] = [
         f"**Seller Trust Score: {result['score']}/100 ({result['grade']})**",
         f"Risk Level: {result['risk_level'].upper()}",
         "",

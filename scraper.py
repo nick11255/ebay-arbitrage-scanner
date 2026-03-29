@@ -1,10 +1,14 @@
 """Playwright scraper for eBay sold/completed listing comp data."""
 
+from __future__ import annotations
+
 import asyncio
 import re
 import logging
 from datetime import datetime
 from typing import Optional
+
+from types_ import CompData, CompStats
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +29,7 @@ async def _get_browser():
     return _browser
 
 
-async def close_browser():
+async def close_browser() -> None:
     """Clean shutdown of browser."""
     global _browser, _playwright
     if _browser:
@@ -49,7 +53,7 @@ def _parse_price(price_text: str) -> Optional[float]:
 
 def _parse_date(date_text: str) -> Optional[str]:
     """Parse sold date from eBay listing."""
-    patterns = [
+    patterns: list[str] = [
         r"Sold\s+(\w+\s+\d{1,2},?\s*\d{4})",
         r"(\w+\s+\d{1,2},?\s*\d{4})",
         r"(\d{1,2}/\d{1,2}/\d{4})",
@@ -67,7 +71,7 @@ async def scrape_sold_comps(
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
     max_results: int = 30,
-) -> list[dict]:
+) -> list[CompData]:
     """Scrape eBay sold listings for comparable sales data.
 
     Args:
@@ -89,9 +93,9 @@ async def scrape_sold_comps(
         )
     )
 
-    comps = []
+    comps: list[CompData] = []
     try:
-        search_url = (
+        search_url: str = (
             "https://www.ebay.com/sch/i.html?"
             f"_nkw={query.replace(' ', '+')}"
             "&LH_Complete=1&LH_Sold=1&_sop=13"
@@ -123,39 +127,39 @@ async def scrape_sold_comps(
                 if not title_el or not price_el:
                     continue
 
-                title = (await title_el.inner_text()).strip()
+                title: str = (await title_el.inner_text()).strip()
                 if title.lower() in ("shop on ebay", "results matching fewer words"):
                     continue
 
-                price = _parse_price(await price_el.inner_text())
+                price: Optional[float] = _parse_price(await price_el.inner_text())
                 if price is None:
                     continue
 
                 # Model-specific filtering
                 if model_keywords:
-                    title_lower = title.lower()
+                    title_lower: str = title.lower()
                     if not all(kw.lower() in title_lower for kw in model_keywords):
                         continue
 
-                sold_date = None
+                sold_date: Optional[str] = None
                 if date_el:
                     sold_date = _parse_date(await date_el.inner_text())
 
-                shipping_cost = 0.0
+                shipping_cost: float = 0.0
                 if shipping_el:
-                    ship_text = (await shipping_el.inner_text()).lower()
+                    ship_text: str = (await shipping_el.inner_text()).lower()
                     if "free" in ship_text:
                         shipping_cost = 0.0
                     else:
-                        parsed = _parse_price(ship_text)
+                        parsed: Optional[float] = _parse_price(ship_text)
                         if parsed is not None:
                             shipping_cost = parsed
 
-                condition = ""
+                condition: str = ""
                 if condition_el:
                     condition = (await condition_el.inner_text()).strip()
 
-                url = ""
+                url: str = ""
                 if link_el:
                     url = await link_el.get_attribute("href") or ""
 
@@ -186,7 +190,7 @@ async def scrape_sold_comps(
     return comps
 
 
-def trim_outliers(comps: list[dict], pct: float = 0.10) -> list[dict]:
+def trim_outliers(comps: list[CompData], pct: float = 0.10) -> list[CompData]:
     """Remove top and bottom percentage of comps by price.
 
     Args:
@@ -199,12 +203,14 @@ def trim_outliers(comps: list[dict], pct: float = 0.10) -> list[dict]:
     if len(comps) < 5:
         return comps
 
-    sorted_comps = sorted(comps, key=lambda c: c["price"])
-    trim_count = max(1, int(len(sorted_comps) * pct))
+    sorted_comps: list[CompData] = sorted(comps, key=lambda c: c["price"])
+    trim_count: int = max(1, int(len(sorted_comps) * pct))
     return sorted_comps[trim_count:-trim_count]
 
 
-def filter_comps_by_condition(comps: list[dict], condition: str) -> list[dict]:
+def filter_comps_by_condition(
+    comps: list[CompData], condition: str
+) -> list[CompData]:
     """Filter comps to match the item's condition.
 
     When condition is 'used' or 'pre-owned', only return used/pre-owned comps.
@@ -221,16 +227,16 @@ def filter_comps_by_condition(comps: list[dict], condition: str) -> list[dict]:
     if not condition:
         return comps
 
-    condition_lower = condition.lower()
+    condition_lower: str = condition.lower()
 
     if "used" in condition_lower or "pre-owned" in condition_lower:
-        targets = ["used", "pre-owned"]
+        targets: list[str] = ["used", "pre-owned"]
     elif "new" in condition_lower:
         targets = ["new", "brand new"]
     else:
         return comps
 
-    filtered = [
+    filtered: list[CompData] = [
         c for c in comps
         if any(t in c.get("condition", "").lower() for t in targets)
     ]
@@ -241,7 +247,7 @@ def filter_comps_by_condition(comps: list[dict], condition: str) -> list[dict]:
     return filtered
 
 
-def analyze_comps(comps: list[dict]) -> dict:
+def analyze_comps(comps: list[CompData]) -> CompStats:
     """Analyze scraped comp data to get pricing statistics.
 
     Returns dict with avg_price, median_price, min_price, max_price,
@@ -254,13 +260,13 @@ def analyze_comps(comps: list[dict]) -> dict:
             "sell_through": "low",
         }
 
-    prices = sorted([c["price"] for c in comps])
-    n = len(prices)
+    prices: list[float] = sorted([c["price"] for c in comps])
+    n: int = len(prices)
 
-    avg_price = sum(prices) / n
-    median_price = prices[n // 2] if n % 2 else (prices[n // 2 - 1] + prices[n // 2]) / 2
-    min_price = prices[0]
-    max_price = prices[-1]
+    avg_price: float = sum(prices) / n
+    median_price: float = prices[n // 2] if n % 2 else (prices[n // 2 - 1] + prices[n // 2]) / 2
+    min_price: float = prices[0]
+    max_price: float = prices[-1]
 
     # Sell-through indicator based on comp volume
     if n >= 20:

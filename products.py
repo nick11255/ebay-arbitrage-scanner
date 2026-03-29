@@ -1,6 +1,12 @@
 """Product database for eBay arbitrage scanner - 185 entries with tight filtering."""
 
-PRODUCTS = [
+from __future__ import annotations
+
+from typing import Optional
+
+from types_ import ProductConfig
+
+PRODUCTS: list[ProductConfig] = [
     # ========== VIDEO GAME CONSOLES (Group 1) ==========
     {"name": "PS5 Disc Edition", "query": "PS5 disc edition console", "exclude": ["digital", "slim", "pro", "controller", "game", "bundle pack"], "category": "gaming", "min_price": 300, "max_price": 500, "model_keywords": ["ps5", "disc"], "group": 1},
     {"name": "PS5 Digital Edition", "query": "PS5 digital edition console", "exclude": ["disc", "slim", "pro", "controller", "game"], "category": "gaming", "min_price": 250, "max_price": 450, "model_keywords": ["ps5", "digital"], "group": 1},
@@ -204,25 +210,25 @@ PRODUCTS = [
 ]
 
 
-def get_products_by_group(group: int) -> list[dict]:
+def get_products_by_group(group: int) -> list[ProductConfig]:
     """Get all products in a specific scan group."""
     return [p for p in PRODUCTS if p["group"] == group]
 
 
-def get_all_groups() -> dict[int, list[dict]]:
+def get_all_groups() -> dict[int, list[ProductConfig]]:
     """Get products organized by group number."""
-    groups = {}
+    groups: dict[int, list[ProductConfig]] = {}
     for p in PRODUCTS:
-        g = p["group"]
+        g: int = p["group"]
         if g not in groups:
             groups[g] = []
         groups[g].append(p)
     return groups
 
 
-def get_product_by_name(name: str) -> dict | None:
+def get_product_by_name(name: str) -> Optional[ProductConfig]:
     """Find a product by exact or partial name match."""
-    name_lower = name.lower()
+    name_lower: str = name.lower()
     for p in PRODUCTS:
         if p["name"].lower() == name_lower:
             return p
@@ -232,18 +238,18 @@ def get_product_by_name(name: str) -> dict | None:
     return None
 
 
-def get_products_by_category(category: str) -> list[dict]:
+def get_products_by_category(category: str) -> list[ProductConfig]:
     """Get all products in a category."""
     return [p for p in PRODUCTS if p["category"] == category]
 
 
 def get_group_summary() -> str:
     """Get a summary of products per group."""
-    groups = get_all_groups()
-    lines = []
+    groups: dict[int, list[ProductConfig]] = get_all_groups()
+    lines: list[str] = []
     for g in sorted(groups.keys()):
-        products = groups[g]
-        categories = set(p["category"] for p in products)
+        products: list[ProductConfig] = groups[g]
+        categories: set[str] = set(p["category"] for p in products)
         lines.append(
             f"Group {g}: {len(products)} products ({', '.join(sorted(categories))})"
         )

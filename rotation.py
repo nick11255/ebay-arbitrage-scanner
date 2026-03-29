@@ -1,5 +1,7 @@
 """8-group scan rotation system for staying within 5,000/day API limit."""
 
+from __future__ import annotations
+
 import json
 import os
 import logging
@@ -7,13 +9,16 @@ from datetime import datetime, timezone
 
 import config
 from products import get_products_by_group, PRODUCTS
+from types_ import (
+    DailyCallEstimate, GroupInfo, ProductConfig, RotationStatus,
+)
 
 logger = logging.getLogger(__name__)
 
-STATE_FILE = "data/rotation_state.json"
+STATE_FILE: str = "data/rotation_state.json"
 
 
-def _ensure_data_dir():
+def _ensure_data_dir() -> None:
     os.makedirs("data", exist_ok=True)
 
 
@@ -33,7 +38,7 @@ def _load_state() -> dict:
     }
 
 
-def _save_state(state: dict):
+def _save_state(state: dict) -> None:
     """Persist rotation state to disk."""
     _ensure_data_dir()
     with open(STATE_FILE, "w") as f:
@@ -42,22 +47,22 @@ def _save_state(state: dict):
 
 def get_current_group() -> int:
     """Get the current group number to scan."""
-    state = _load_state()
+    state: dict = _load_state()
     return state["current_group"]
 
 
-def get_next_scan_group() -> tuple[int, list[dict]]:
+def get_next_scan_group() -> tuple[int, list[ProductConfig]]:
     """Get the next group to scan and its products.
 
     Returns:
         Tuple of (group_number, list of product dicts)
     """
-    state = _load_state()
-    group = state["current_group"]
-    products = get_products_by_group(group)
+    state: dict = _load_state()
+    group: int = state["current_group"]
+    products: list[ProductConfig] = get_products_by_group(group)
 
     # Estimate API calls for this group
-    estimated_calls = len(products) * config.CALLS_PER_PRODUCT
+    estimated_calls: int = len(products) * config.CALLS_PER_PRODUCT
     logger.info(
         f"Next scan: Group {group} ({len(products)} products, "
         f"~{estimated_calls} API calls)"
@@ -66,11 +71,11 @@ def get_next_scan_group() -> tuple[int, list[dict]]:
     return group, products
 
 
-def advance_group():
+def advance_group() -> None:
     """Move to the next scan group after completing current scan."""
-    state = _load_state()
-    current = state["current_group"]
-    now = datetime.now(timezone.utc).isoformat()
+    state: dict = _load_state()
+    current: int = state["current_group"]
+    now: str = datetime.now(timezone.utc).isoformat()
 
     state["last_scan"][str(current)] = now
     state["scan_count"] += 1
@@ -83,13 +88,13 @@ def advance_group():
     )
 
 
-def get_rotation_status() -> dict:
+def get_rotation_status() -> RotationStatus:
     """Get current rotation status for display."""
-    state = _load_state()
-    groups = {}
+    state: dict = _load_state()
+    groups: dict[int, GroupInfo] = {}
     for g in range(1, config.NUM_GROUPS + 1):
-        products = get_products_by_group(g)
-        last = state["last_scan"].get(str(g), "Never")
+        products: list[ProductConfig] = get_products_by_group(g)
+        last: str = state["last_scan"].get(str(g), "Never")
         groups[g] = {
             "products": len(products),
             "last_scan": last,
@@ -104,26 +109,26 @@ def get_rotation_status() -> dict:
     }
 
 
-def estimate_daily_calls() -> dict:
+def estimate_daily_calls() -> DailyCallEstimate:
     """Estimate total daily API calls based on rotation schedule.
 
     With 8 groups and scans every SCAN_INTERVAL_MINUTES:
     - scans_per_day = 1440 / interval
     - calls_per_scan = products_in_group * CALLS_PER_PRODUCT
     """
-    interval = config.SCAN_INTERVAL_MINUTES
-    scans_per_day = 1440 // interval
+    interval: int = config.SCAN_INTERVAL_MINUTES
+    scans_per_day: int = 1440 // interval
 
     # Each scan covers 1 group, so we cycle through all 8 groups
-    total_calls = 0
+    total_calls: int = 0
     for g in range(1, config.NUM_GROUPS + 1):
-        products = get_products_by_group(g)
+        products: list[ProductConfig] = get_products_by_group(g)
         total_calls += len(products) * config.CALLS_PER_PRODUCT
 
     # In a day we go through scans_per_day scans, each hitting one group
     # Full cycles = scans_per_day / NUM_GROUPS
-    full_cycles = scans_per_day / config.NUM_GROUPS
-    estimated_daily = int(total_calls * full_cycles)
+    full_cycles: float = scans_per_day / config.NUM_GROUPS
+    estimated_daily: int = int(total_calls * full_cycles)
 
     return {
         "scans_per_day": scans_per_day,
@@ -135,12 +140,25 @@ def estimate_daily_calls() -> dict:
     }
 
 
+def get_time_until_full_rotation() -> str:
+    """Estimate time until all 8 groups complete one full rotation."""
+    state: dict = _load_state()
+    current: int = state["current_group"]
+    remaining_groups: int = config.NUM_GROUPS - current + 1
+    minutes: int = remaining_groups * config.SCAN_INTERVAL_MINUTES
+    hours: int = minutes // 60
+    mins: int = minutes % 60
+    if hours > 0:
+        return f"{hours}h {mins}m"
+    return f"{mins}m"
+
+
 def format_rotation_status() -> str:
     """Format rotation status for display."""
-    status = get_rotation_status()
-    estimate = estimate_daily_calls()
+    status: RotationStatus = get_rotation_status()
+    estimate: DailyCallEstimate = estimate_daily_calls()
 
-    lines = [
+    lines: list[str] = [
         f"**Scan Rotation Status**",
         f"Current Group: {status['current_group']} of {config.NUM_GROUPS}",
         f"Total Scans: {status['total_scans']}",
@@ -150,7 +168,7 @@ def format_rotation_status() -> str:
     ]
 
     for g, info in sorted(status["groups"].items()):
-        marker = " << NEXT" if info["is_next"] else ""
+        marker: str = " << NEXT" if info["is_next"] else ""
         lines.append(
             f"  Group {g}: {info['products']} products | "
             f"Last: {info['last_scan']}{marker}"
