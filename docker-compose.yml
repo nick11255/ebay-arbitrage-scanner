@@ -1,0 +1,12 @@
+services:
+  bot:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - bot-data:/app/data
+      - ./arbitrage.db:/app/arbitrage.db
+    restart: unless-stopped
+
+volumes:
+  bot-data:

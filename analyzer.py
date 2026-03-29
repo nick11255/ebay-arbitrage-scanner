@@ -1,5 +1,6 @@
 """Deal analysis engine: comp refinement, scoring, and channel routing."""
 
+import re
 import logging
 import config
 
@@ -47,6 +48,29 @@ def calculate_profit(buy_price: float, sell_price: float, shipping_cost: float =
         "roi": round(roi, 1),
         **fees,
     }
+
+
+def extract_model_id(title: str) -> str | None:
+    """Extract model number/ID from a product title.
+
+    Looks for alphanumeric model identifiers (e.g., DCD771C2, RTX4090, A2842).
+
+    Returns:
+        The extracted model ID string, or None if not found.
+    """
+    # Match patterns like DCD771C2, RTX4090, MX-500, A2842
+    # Must have both letters and digits, at least 4 chars
+    patterns = [
+        r'\b([A-Z]{1,5}[-]?\d{2,}[A-Z0-9]*)\b',   # Letters then digits: DCD771C2, RTX4090
+        r'\b([A-Z]\d+[A-Z]{2,}[A-Z0-9]*)\b',        # Letter+digits+letters: A7III
+        r'\b(\d{1,3}[A-Z]{1,5}\d+[A-Z0-9]*)\b',     # Digits then letters: 5600X, 3070Ti
+        r'\b([A-Z]\d{4,})\b',                         # Single letter + digits: A2842
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, title, re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+    return None
 
 
 def refine_comps(comps: list[dict], product: dict) -> list[dict]:
