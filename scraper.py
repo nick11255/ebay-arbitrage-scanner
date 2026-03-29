@@ -186,6 +186,61 @@ async def scrape_sold_comps(
     return comps
 
 
+def trim_outliers(comps: list[dict], pct: float = 0.10) -> list[dict]:
+    """Remove top and bottom percentage of comps by price.
+
+    Args:
+        comps: List of comp dicts with 'price' key
+        pct: Fraction to trim from each end (default 10%)
+
+    Returns:
+        Trimmed list of comps
+    """
+    if len(comps) < 5:
+        return comps
+
+    sorted_comps = sorted(comps, key=lambda c: c["price"])
+    trim_count = max(1, int(len(sorted_comps) * pct))
+    return sorted_comps[trim_count:-trim_count]
+
+
+def filter_comps_by_condition(comps: list[dict], condition: str) -> list[dict]:
+    """Filter comps to match the item's condition.
+
+    When condition is 'used' or 'pre-owned', only return used/pre-owned comps.
+    When condition is 'new', only return new comps.
+    Falls back to all comps if filtering yields too few results (<3).
+
+    Args:
+        comps: List of comp dicts with 'condition' key
+        condition: The item's condition string
+
+    Returns:
+        Filtered list of comps
+    """
+    if not condition:
+        return comps
+
+    condition_lower = condition.lower()
+
+    if "used" in condition_lower or "pre-owned" in condition_lower:
+        targets = ["used", "pre-owned"]
+    elif "new" in condition_lower:
+        targets = ["new", "brand new"]
+    else:
+        return comps
+
+    filtered = [
+        c for c in comps
+        if any(t in c.get("condition", "").lower() for t in targets)
+    ]
+
+    if len(filtered) < 3:
+        return comps
+
+    return filtered
+
+
 def analyze_comps(comps: list[dict]) -> dict:
     """Analyze scraped comp data to get pricing statistics.
 
