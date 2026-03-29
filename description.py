@@ -1,13 +1,18 @@
 """Description verification and red flag detection for eBay listings."""
 
+from __future__ import annotations
+
 import re
 import logging
+from typing import Optional
+
 import config
+from types_ import ListingVerification, RedFlag, RedFlagResult
 
 logger = logging.getLogger(__name__)
 
 
-def check_red_flags(title: str, description: str = "") -> dict:
+def check_red_flags(title: str, description: str = "") -> RedFlagResult:
     """Scan listing title and description for red flags.
 
     Args:
@@ -17,15 +22,15 @@ def check_red_flags(title: str, description: str = "") -> dict:
     Returns:
         Dict with flags found, count, risk_level, details
     """
-    text = f"{title} {description}".lower()
+    text: str = f"{title} {description}".lower()
     # Strip HTML tags
     text = re.sub(r"<[^>]+>", " ", text)
 
-    found_flags = []
+    found_flags: list[RedFlag] = []
     for keyword in config.RED_FLAG_KEYWORDS:
         if keyword.lower() in text:
             # Determine if it's in title or description
-            location = []
+            location: list[str] = []
             if keyword.lower() in title.lower():
                 location.append("title")
             if description and keyword.lower() in description.lower():
@@ -36,7 +41,7 @@ def check_red_flags(title: str, description: str = "") -> dict:
             })
 
     # Additional pattern checks
-    patterns = [
+    patterns: list[tuple[str, str]] = [
         (r"(?:no|without|missing)\s+(?:box|manual|accessories|charger|cable|remote)",
          "Missing components"),
         (r"(?:crack|chip|scratch|dent|ding)\s*(?:ed|s|ing)?",
@@ -56,7 +61,7 @@ def check_red_flags(title: str, description: str = "") -> dict:
             if not any(f["keyword"] == label for f in found_flags):
                 found_flags.append({"keyword": label, "location": "pattern"})
 
-    count = len(found_flags)
+    count: int = len(found_flags)
     if count == 0:
         risk = "clean"
     elif count <= 2:
@@ -73,7 +78,7 @@ def check_red_flags(title: str, description: str = "") -> dict:
     }
 
 
-def verify_listing(item: dict) -> dict:
+def verify_listing(item: dict) -> ListingVerification:
     """Full listing verification combining description and seller checks.
 
     Args:
@@ -82,20 +87,20 @@ def verify_listing(item: dict) -> dict:
     Returns:
         Dict with red_flags, condition_match, listing_quality score
     """
-    title = item.get("title", "")
-    description = item.get("description", "")
-    condition = item.get("condition", "")
+    title: str = item.get("title", "")
+    description: str = item.get("description", "")
+    condition: str = item.get("condition", "")
 
-    red_flags = check_red_flags(title, description)
+    red_flags: RedFlagResult = check_red_flags(title, description)
 
     # Check condition consistency
-    condition_issues = []
-    condition_lower = condition.lower() if condition else ""
-    title_lower = title.lower()
-    desc_lower = description.lower() if description else ""
+    condition_issues: list[str] = []
+    condition_lower: str = condition.lower() if condition else ""
+    title_lower: str = title.lower()
+    desc_lower: str = description.lower() if description else ""
 
     if "new" in condition_lower:
-        used_indicators = ["used", "open box", "opened", "tested", "pre-owned"]
+        used_indicators: list[str] = ["used", "open box", "opened", "tested", "pre-owned"]
         for indicator in used_indicators:
             if indicator in title_lower or indicator in desc_lower:
                 condition_issues.append(
@@ -109,7 +114,7 @@ def verify_listing(item: dict) -> dict:
             )
 
     # Listing quality score (0-100)
-    quality = 100
+    quality: int = 100
     quality -= red_flags["count"] * 10
     quality -= len(condition_issues) * 15
     if not description:
@@ -127,10 +132,10 @@ def verify_listing(item: dict) -> dict:
     }
 
 
-def format_risk_report(verification: dict) -> str:
+def format_risk_report(verification: ListingVerification) -> str:
     """Format listing verification into readable risk report."""
-    rf = verification["red_flags"]
-    lines = [
+    rf: RedFlagResult = verification["red_flags"]
+    lines: list[str] = [
         f"**Listing Risk Assessment**",
         f"Quality Score: {verification['listing_quality']}/100",
         f"Red Flag Level: {rf['risk_level'].upper()}",
