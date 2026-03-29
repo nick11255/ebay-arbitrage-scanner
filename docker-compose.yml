@@ -3,10 +3,23 @@ services:
     build: .
     env_file:
       - .env
+    environment:
+      - REDIS_HOST=redis
     volumes:
       - bot-data:/app/data
       - ./arbitrage.db:/app/arbitrage.db
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
 
 volumes:
   bot-data:
+  redis_data:

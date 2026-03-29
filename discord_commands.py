@@ -26,6 +26,7 @@ from rotation import (
     format_rotation_status, estimate_daily_calls,
     get_current_group, get_time_until_full_rotation,
 )
+from cache import get_cache
 from products import get_product_by_name, get_group_summary, PRODUCTS
 from types_ import CompStats, DealScore, ProfitInfo, UserStats
 import config
@@ -614,3 +615,60 @@ def setup_commands(bot: commands.Bot, ebay: EbayAPI) -> None:
             # Clean up temp file
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+    @bot.command(name="cache")
+    async def cache_status(ctx: commands.Context) -> None:
+        """Show Redis cache stats."""
+        cache = get_cache()
+        stats: dict = cache.flush_expired()
+        total_keys: int = cache.key_count()
+        expiring_soon: int = cache.keys_expiring_within(3600)
+        memory: int = cache.memory_estimate_bytes()
+
+        # Format memory
+        if memory >= 1_048_576:
+            mem_str: str = f"{memory / 1_048_576:.1f} MB"
+        elif memory >= 1024:
+            mem_str = f"{memory / 1024:.1f} KB"
+        else:
+            mem_str = f"{memory} B"
+
+        mode: str = "In-Memory Fallback" if cache.is_fallback else "Redis"
+        color: discord.Color = (
+            discord.Color.orange() if cache.is_fallback
+            else discord.Color.green()
+        )
+
+        embed = discord.Embed(title="Cache Status", color=color)
+        embed.add_field(
+            name="Connection",
+            value=f"**{mode}**",
+            inline=True,
+        )
+        embed.add_field(
+            name="Total Keys",
+            value=str(total_keys),
+            inline=True,
+        )
+        embed.add_field(
+            name="Memory Usage",
+            value=mem_str,
+            inline=True,
+        )
+        embed.add_field(
+            name="Hit Rate",
+            value=f"{stats['hit_rate']}%",
+            inline=True,
+        )
+        embed.add_field(
+            name="Hits / Misses",
+            value=f"{stats['hits']} / {stats['misses']}",
+            inline=True,
+        )
+        embed.add_field(
+            name="Expiring <1h",
+            value=str(expiring_soon),
+            inline=True,
+        )
+
+        await ctx.send(embed=embed)

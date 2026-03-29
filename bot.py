@@ -22,6 +22,7 @@ from tracker import record_scan, record_posted_deal
 from rotation import get_next_scan_group, advance_group
 from discord_commands import setup_commands
 from discord_ui import setup_claim_handler, setup_onboarding, post_deal
+from cache import get_cached_comps_detail, cache_comps_detail, get_cache
 from types_ import CompStats, DealScore, ProductConfig, RedFlagResult, SellerScore
 
 # Logging setup
@@ -88,17 +89,25 @@ async def scan_loop() -> None:
                 record_scan(product["name"], 0, 0)
                 continue
 
-            # Get sold comps for price comparison
-            comps: list[dict] = await scrape_sold_comps(
-                product["query"],
-                model_keywords=product.get("model_keywords"),
-                min_price=product.get("min_price"),
-                max_price=product.get("max_price"),
-                max_results=15,
-            )
+            # Get sold comps — check cache first
+            cached: list[dict] | None = get_cached_comps_detail(product["name"])
+            if cached is not None:
+                comps: list[dict] = cached
+                logger.info(f"Cache hit for comps: {product['name']}")
+            else:
+                comps = await scrape_sold_comps(
+                    product["query"],
+                    model_keywords=product.get("model_keywords"),
+                    min_price=product.get("min_price"),
+                    max_price=product.get("max_price"),
+                    max_results=15,
+                )
+                # Refine comps to match model
+                comps = refine_comps(comps, product)
+                # Cache the refined comps for next time
+                if comps:
+                    cache_comps_detail(product["name"], comps)
 
-            # Refine comps to match model
-            comps = refine_comps(comps, product)
             comp_stats: CompStats = analyze_comps(comps)
 
             product_deals: int = 0
