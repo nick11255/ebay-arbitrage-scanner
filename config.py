@@ -15,6 +15,11 @@ EBAY_AUTH_URL: str = "https://api.ebay.com/identity/v1/oauth2/token"
 EBAY_BROWSE_URL: str = "https://api.ebay.com/buy/browse/v1"
 
 # Discord
+# Redis cache
+REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+
 DISCORD_TOKEN: str = os.getenv("DISCORD_TOKEN", "")
 DISCORD_DEALS_CHANNEL: int = int(os.getenv("DISCORD_DEALS_CHANNEL", "0"))
 DISCORD_HOT_DEALS_CHANNEL: int = int(os.getenv("DISCORD_HOT_DEALS_CHANNEL", "0"))

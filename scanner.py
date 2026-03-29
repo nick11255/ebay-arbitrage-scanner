@@ -22,6 +22,7 @@ from rotation import (
     format_rotation_status, estimate_daily_calls,
 )
 from products import get_group_summary
+from cache import get_cached_comps_detail, cache_comps_detail
 from types_ import (
     CompStats, DealScore, ProductConfig, RedFlagResult, SellerScore,
 )
@@ -83,15 +84,22 @@ async def run_scan_cycle(ebay: EbayAPI) -> list[tuple[dict, DealScore, str]]:
 
             print(f"{len(items)} listings", end=" ")
 
-            # Get sold comps
-            comps: list[dict] = await scrape_sold_comps(
-                product["query"],
-                model_keywords=product.get("model_keywords"),
-                min_price=product.get("min_price"),
-                max_price=product.get("max_price"),
-                max_results=15,
-            )
-            comps = refine_comps(comps, product)
+            # Get sold comps — check cache first
+            cached: list[dict] | None = get_cached_comps_detail(product["name"])
+            if cached is not None:
+                comps: list[dict] = cached
+                print("(cached)", end=" ")
+            else:
+                comps = await scrape_sold_comps(
+                    product["query"],
+                    model_keywords=product.get("model_keywords"),
+                    min_price=product.get("min_price"),
+                    max_price=product.get("max_price"),
+                    max_results=15,
+                )
+                comps = refine_comps(comps, product)
+                if comps:
+                    cache_comps_detail(product["name"], comps)
             comp_stats: CompStats = analyze_comps(comps)
 
             print(f"| {comp_stats['num_comps']} comps (avg ${comp_stats['avg_price']:.2f})")
