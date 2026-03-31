@@ -1,9 +1,4 @@
-"""eBay Arbitrage Scanner - Discord Bot Entry Point.
-
-Run with: python bot.py
-"""
-
-from __future__ import annotations
+"""Discord bot — scans eBay for arbitrage deals and posts to a channel."""
 
 import asyncio
 import logging
@@ -13,222 +8,129 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from ebay_api import EbayAPI
-from scraper import scrape_sold_comps, analyze_comps, close_browser
-from analyzer import score_deal, refine_comps
-from description import check_red_flags
-from seller import score_seller
-from tracker import record_scan, record_posted_deal
-from rotation import get_next_scan_group, advance_group
-from discord_commands import setup_commands
-from discord_ui import setup_claim_handler, setup_onboarding, post_deal
-from cache import get_cached_comps_detail, cache_comps_detail, get_cache
-from types_ import CompStats, DealScore, ProductConfig, RedFlagResult, SellerScore
+from ebay_api import search_items, close_session
+from scraper import scrape_sold_comps, get_median, close_browser
+from analyzer import calculate_profit, score_deal
+from products import PRODUCTS
 
-# Logging setup
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("bot.log", mode="a"),
-    ],
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
-logger = logging.getLogger(__name__)
+log = logging.getLogger("bot")
 
-# Bot setup
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
-intents.reactions = True
-
-bot: commands.Bot = commands.Bot(command_prefix="!", intents=intents)
-ebay: EbayAPI = EbayAPI()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 @bot.event
-async def on_ready() -> None:
-    logger.info(f"Bot connected as {bot.user} (ID: {bot.user.id})")
-    logger.info(f"Connected to {len(bot.guilds)} server(s)")
-
+async def on_ready():
+    log.info(f"Bot ready: {bot.user}")
     if not scan_loop.is_running():
         scan_loop.start()
-        logger.info("Scan loop started")
 
 
-@tasks.loop(minutes=config.SCAN_INTERVAL_MINUTES)
-async def scan_loop() -> None:
-    """Main scan rotation loop."""
-    if not ebay.can_make_call():
-        logger.warning("Daily API limit reached, skipping scan cycle")
+@tasks.loop(minutes=config.SCAN_INTERVAL)
+async def scan_loop():
+    """Scan all products, post deals above the score threshold."""
+    channel = bot.get_channel(config.DISCORD_CHANNEL_ID)
+    if not channel:
+        log.error("Deals channel not found")
         return
 
-    group_num: int
-    products: list[ProductConfig]
-    group_num, products = get_next_scan_group()
-    logger.info(f"Starting scan cycle: Group {group_num} ({len(products)} products)")
-
-    deals_found: int = 0
-
-    for product in products:
-        if not ebay.can_make_call():
-            logger.warning("API limit reached mid-scan, stopping")
-            break
-
+    for product in PRODUCTS:
         try:
-            # Search active listings
-            items: list[dict] = await ebay.search_with_exclusions(
-                query=product["query"],
-                exclude_keywords=product.get("exclude", []),
-                min_price=product.get("min_price"),
-                max_price=product.get("max_price"),
-                limit=20,
+            items = await search_items(
+                product["query"], max_price=product["max_price"]
             )
-
             if not items:
-                record_scan(product["name"], 0, 0)
                 continue
 
-            # Get sold comps — check cache first
-            cached: list[dict] | None = get_cached_comps_detail(product["name"])
-            if cached is not None:
-                comps: list[dict] = cached
-                logger.info(f"Cache hit for comps: {product['name']}")
-            else:
-                comps = await scrape_sold_comps(
-                    product["query"],
-                    model_keywords=product.get("model_keywords"),
-                    min_price=product.get("min_price"),
-                    max_price=product.get("max_price"),
-                    max_results=15,
-                )
-                # Refine comps to match model
-                comps = refine_comps(comps, product)
-                # Cache the refined comps for next time
-                if comps:
-                    cache_comps_detail(product["name"], comps)
-
-            comp_stats: CompStats = analyze_comps(comps)
-
-            product_deals: int = 0
+            prices = await scrape_sold_comps(product["query"])
+            median_price = get_median(prices)
+            if median_price <= 0:
+                continue
 
             for item in items:
-                price_info: dict = item.get("price", {})
-                buy_price: float = float(price_info.get("value", 0))
+                buy_price = float(item.get("price", {}).get("value", 0))
                 if buy_price <= 0:
                     continue
 
-                # Check description red flags
-                title: str = item.get("title", "")
-                red_flags: RedFlagResult = check_red_flags(title)
+                seller = item.get("seller", {})
+                feedback = float(seller.get("feedbackPercentage", "0") or "0")
 
-                # Score seller
-                seller_info: dict = item.get("seller", {})
-                seller_result: SellerScore | dict = (
-                    score_seller(seller_info) if seller_info else {"score": 50}
-                )
+                score = score_deal(buy_price, median_price, len(prices), feedback)
+                info = calculate_profit(buy_price, median_price)
 
-                # Score the deal
-                deal: DealScore = score_deal(
-                    buy_price=buy_price,
-                    comp_stats=comp_stats,
-                    seller_score=seller_result["score"],
-                    red_flags=red_flags["count"],
-                )
-
-                # Filter by minimum thresholds
-                profit: float = deal["profit_info"].get("profit", 0)
-                margin: float = deal["profit_info"].get("margin", 0)
-
-                if (
-                    profit >= config.MIN_PROFIT
-                    and margin >= config.MIN_MARGIN
-                    and deal["channel"] != "skip"
-                ):
-                    await post_deal(bot, item, deal, product["name"])
-                    product_deals += 1
-                    deals_found += 1
-
-                    # Record posted deal for analytics
-                    record_posted_deal(
-                        product_name=product["name"],
-                        buy_price=buy_price,
-                        sold_median=comp_stats.get("median_price", 0),
-                        estimated_profit=profit,
-                        margin=margin,
-                        deal_score=deal["score"],
-                        seller_rating=seller_result["score"],
+                if score >= config.MIN_SCORE and info["profit"] >= config.MIN_PROFIT:
+                    embed = discord.Embed(
+                        title=item.get("title", "Deal Found"),
                         url=item.get("itemWebUrl", ""),
+                        color=0x2ECC71,
                     )
+                    embed.add_field(name="Buy Price", value=f"${buy_price:.2f}")
+                    embed.add_field(name="Median Sold", value=f"${median_price:.2f}")
+                    embed.add_field(name="Est. Profit", value=f"${info['profit']:.2f}")
+                    embed.add_field(name="Margin", value=f"{info['margin']:.1f}%")
+                    embed.add_field(name="Score", value=f"{score}/100")
+                    embed.add_field(name="Comps", value=str(len(prices)))
+                    embed.set_footer(text=f"Fees: ${info['fees']:.2f} | Ship: ${info['shipping']:.2f}")
+                    await channel.send(embed=embed)
 
-                    # Small delay between posts
-                    await asyncio.sleep(1)
-
-            record_scan(product["name"], len(items), product_deals)
-
-            # Rate limit between products
             await asyncio.sleep(2)
 
         except Exception as e:
-            logger.error(f"Error scanning {product['name']}: {e}")
+            log.error(f"Error scanning {product['name']}: {e}")
             continue
-
-    advance_group()
-    logger.info(
-        f"Scan cycle complete: Group {group_num}, "
-        f"{deals_found} deals found"
-    )
 
 
 @scan_loop.before_loop
-async def before_scan() -> None:
+async def before_scan():
     await bot.wait_until_ready()
 
 
-@bot.event
-async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
-    if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"Missing argument: `{error.param.name}`")
-    elif isinstance(error, commands.BadArgument):
-        await ctx.send(f"Invalid argument. Check your command syntax.")
-    elif isinstance(error, commands.CommandNotFound):
-        pass  # Ignore unknown commands
-    else:
-        logger.error(f"Command error: {error}")
-        await ctx.send("An error occurred. Check the logs.")
+@bot.command()
+async def lookup(ctx, *, query: str):
+    """Look up a product: search eBay and show median sold price + profit."""
+    await ctx.send(f"Searching for **{query}**...")
+
+    items = await search_items(query, limit=5)
+    if not items:
+        await ctx.send("No active listings found.")
+        return
+
+    prices = await scrape_sold_comps(query)
+    median_price = get_median(prices)
+
+    if median_price <= 0:
+        await ctx.send("No sold comps found.")
+        return
+
+    buy_price = float(items[0].get("price", {}).get("value", 0))
+    info = calculate_profit(buy_price, median_price)
+
+    await ctx.send(
+        f"**{query}**\n"
+        f"Lowest active listing: ${buy_price:.2f}\n"
+        f"Median sold price: ${median_price:.2f} ({len(prices)} comps)\n"
+        f"Estimated profit: ${info['profit']:.2f} ({info['margin']:.1f}% margin)\n"
+        f"eBay fees: ${info['fees']:.2f} | Shipping: ${info['shipping']:.2f}"
+    )
 
 
-# Register all components
-setup_commands(bot, ebay)
-setup_claim_handler(bot)
-setup_onboarding(bot)
-
-
-async def shutdown() -> None:
-    """Clean shutdown."""
-    logger.info("Shutting down...")
-    await ebay.close()
-    await close_browser()
-    await bot.close()
-
-
-def main() -> None:
+def main():
     if not config.DISCORD_TOKEN:
-        print("ERROR: DISCORD_TOKEN not set in .env file")
-        print("Copy .env.example to .env and fill in your credentials.")
+        print("Set DISCORD_TOKEN in your .env file")
         sys.exit(1)
-
     if not config.EBAY_APP_ID:
-        print("WARNING: EBAY_APP_ID not set. API calls will fail.")
+        print("Warning: EBAY_APP_ID not set, API calls will fail")
 
-    logger.info("Starting eBay Arbitrage Scanner Bot...")
     try:
         bot.run(config.DISCORD_TOKEN)
     except KeyboardInterrupt:
-        logger.info("Received shutdown signal")
-    except Exception as e:
-        logger.error(f"Bot crashed: {e}")
-        raise
+        pass
 
 
 if __name__ == "__main__":
