@@ -59,7 +59,7 @@ def score_deal(buy_price, sell_price, num_comps, seller_feedback):
     else:
         comp_pts = 5
 
-    # Seller score (0-25 points) — based on feedback percentage
+    # Seller score (0-25 points) — based on feedback %
     seller_pts = min(25, int(seller_feedback / 100 * 25))
 
     total = margin_pts + comp_pts + seller_pts
