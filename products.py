@@ -16,7 +16,6 @@ PRODUCTS = [
     {"name": "Sony WH-1000XM5", "query": "Sony WH-1000XM5", "max_price": 200},
     {"name": "Bose QC Ultra", "query": "Bose QuietComfort Ultra", "max_price": 250},
     {"name": "Pokemon Cards Lot", "query": "Pokemon cards lot sealed", "max_price": 100},
-    {"name": "LEGO Star Wars UCS", "query": "LEGO Star Wars UCS sealed", "max_price": 500},
     {"name": "Steam Deck OLED", "query": "Steam Deck OLED", "max_price": 400},
     {"name": "Apple Watch Ultra 2", "query": "Apple Watch Ultra 2", "max_price": 500},
     {"name": "Dyson V15", "query": "Dyson V15 Detect", "max_price": 400},
